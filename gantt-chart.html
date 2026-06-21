@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project Gantt Chart</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d2137;
+    --grid: rgba(255,255,255,0.07);
+    --grid-m: rgba(255,255,255,0.16);
+    --white: #ffffff;
+    --muted: rgba(255,255,255,0.5);
+    --c1: #f0c96e;
+    --c2: #8fc43e;
+    --c3: #f27c5a;
+    --c4: #4dbfd4;
+    --today: #ff5252;
+  }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #071525;
+    min-height: 100vh;
+    padding: 28px 20px;
+    display: flex;
+    justify-content: center;
+  }
+  .card {
+    background: var(--bg);
+    border-radius: 14px;
+    overflow: hidden;
+    width: 100%;
+    max-width: 1100px;
+    box-shadow: 0 8px 48px rgba(0,0,0,0.6);
+  }
+  table { width: 100%; border-collapse: collapse; }
+
+  .h-corner {
+    font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1.2px; color: var(--white); line-height: 1.4;
+    padding: 18px 18px 12px; width: 172px; min-width: 172px;
+    vertical-align: bottom; border-right: 1px solid var(--grid-m);
+  }
+  .h-month {
+    font-size: 15px; font-weight: 600; color: var(--white);
+    text-align: center; padding: 14px 0 4px;
+    border-right: 1px solid var(--grid-m); border-bottom: 1px solid var(--grid);
+  }
+  .h-month:last-child { border-right: none; }
+  .h-week {
+    font-size: 11px; font-weight: 500; color: var(--muted);
+    text-align: center; padding: 4px 0 8px;
+    border-right: 1px solid var(--grid); min-width: 50px; width: 50px;
+  }
+  .h-week:last-child { border-right: none; }
+  .h-week.month-end { border-right: 1px solid var(--grid-m); }
+
+  .row-phase td {
+    border-right: 1px solid var(--grid);
+    background: rgba(255,255,255,0.025);
+  }
+  .row-phase td:last-child { border-right: none; }
+  .phase-label {
+    font-size: 18px; font-weight: 700; color: var(--white);
+    padding: 14px 18px 5px; vertical-align: bottom;
+    border-right: 1px solid var(--grid-m) !important;
+    white-space: nowrap;
+  }
+  .bar-td {
+    position: relative; padding: 0; vertical-align: middle;
+  }
+
+  .row-task td {
+    height: 36px; border-right: 1px solid var(--grid);
+    border-bottom: 1px solid var(--grid); position: relative;
+  }
+  .row-task td:last-child { border-right: none; }
+  .task-label {
+    font-size: 12px; font-weight: 400; color: var(--muted);
+    padding: 0 18px; white-space: nowrap; vertical-align: middle;
+    border-right: 1px solid var(--grid-m) !important;
+  }
+
+  .row-gap td { height: 6px; border-right: 1px solid var(--grid); }
+  .row-gap td:first-child { border-right: 1px solid var(--grid-m); }
+  .row-gap td:last-child { border-right: none; }
+
+  .bar {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    border-radius: 30px; display: flex; align-items: center; padding: 0 9px;
+    pointer-events: none;
+  }
+  .bar-phase { height: 24px; }
+  .bar-task  { height: 17px; }
+  .milestone {
+    position: absolute; top: 50%; transform: translateY(-50%) rotate(45deg);
+    width: 15px; height: 15px; border-radius: 3px; pointer-events: none;
+  }
+  .tline {
+    position: absolute; top: 0; bottom: 0; width: 2px;
+    background: var(--today); z-index: 20; pointer-events: none;
+  }
+  .vg { position: absolute; top: 0; bottom: 0; width: 1px; z-index: 3; pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="card">
+<table id="gt"></table>
+</div>
+<script>
+// Weeks: Mon Jun 1 → each 7 days, 6 total (covers Jun 1 – Jul 12 2026)
+// W1=Jun1-7, W2=Jun8-14, W3=Jun15-21, W4=Jun22-28, W5=Jun29-Jul5, W6=Jul6-12
+const WEEKS = [
+  { label:'W1', start: new Date('2026-06-01') },
+  { label:'W2', start: new Date('2026-06-08') },
+  { label:'W3', start: new Date('2026-06-15') },
+  { label:'W4', start: new Date('2026-06-22') },
+  { label:'W5', start: new Date('2026-06-29') },
+  { label:'W6', start: new Date('2026-07-06') },
+];
+// Jun has 5 week-columns (W1–W5 partially), Jul has 1 (W6)
+const MONTHS = [
+  { label:'June', cols:5 },
+  { label:'July', cols:1 },
+];
+const NW = WEEKS.length;
+const CS = WEEKS[0].start;             // chart origin: Jun 1
+const TODAY = new Date('2026-06-21');  // Sunday, end of W3
+
+function wOff(d){ return (d - CS)/(7*864e5); }
+// left edge % for a date (start of that calendar day)
+function numPctStart(dateStr){ return wOff(new Date(dateStr))/NW*100; }
+// right edge % = start of next day
+function numPctEnd(dateStr){
+  const d = new Date(dateStr);
+  d.setDate(d.getDate()+1);
+  return wOff(d)/NW*100;
+}
+function wpct(w){ return (w/NW*100).toFixed(3)+'%'; }
+const todayPct = (wOff(TODAY)/NW*100).toFixed(3)+'%';
+
+const phases = [
+  { label:'Data & Foundation', color:'var(--c1)', hex:'#f0c96e',
+    bar:{s:'2026-06-12',e:'2026-06-15'},
+    tasks:[
+      { label:'Finalize problem statement & hypotheses', bar:{s:'2026-06-12',e:'2026-06-15'} },
+      { label:'Data acquisition & cleaning',            bar:{s:'2026-06-16',e:'2026-06-18'} },
+    ]
+  },
+  { label:'Analysis', color:'var(--c2)', hex:'#8fc43e',
+    bar:{s:'2026-06-19',e:'2026-06-29'},
+    tasks:[
+      { label:'Validate assumptions & diagnostics', bar:{s:'2026-06-19',e:'2026-06-23'} },
+      { label:'Interpret results & draft findings',  bar:{s:'2026-06-24',e:'2026-06-29'} },
+    ]
+  },
+  { label:'Deliverables', color:'var(--c3)', hex:'#f27c5a',
+    bar:{s:'2026-06-30',e:'2026-07-06'},
+    tasks:[
+      { label:'Tables, figures & visualizations', bar:{s:'2026-06-30',e:'2026-07-02'} },
+      { label:'Write final report',               bar:{s:'2026-07-03',e:'2026-07-06'} },
+    ]
+  },
+  { label:'Presentation', color:'var(--c4)', hex:'#4dbfd4',
+    bar:{s:'2026-07-06',e:'2026-07-08'},
+    tasks:[
+      { label:'Buffer / Internal dry-run', bar:{s:'2026-07-06',e:'2026-07-06'} },
+      { label:'🎯 Presentation Day',        bar:{s:'2026-07-08',e:'2026-07-08'}, milestone:true },
+    ]
+  },
+];
+
+const tbl = document.getElementById('gt');
+
+// ── Header row 1: corner + months ─────────────────────────────────────────────
+const r1 = tbl.insertRow();
+const corner = r1.insertCell();
+corner.className='h-corner'; corner.rowSpan=2;
+corner.innerHTML='PROJECT<br>TIMELINE';
+MONTHS.forEach(m=>{
+  const td=r1.insertCell(); td.className='h-month'; td.colSpan=m.cols; td.textContent=m.label;
+});
+
+// ── Header row 2: week labels ─────────────────────────────────────────────────
+const r2 = tbl.insertRow();
+WEEKS.forEach((w,i)=>{
+  const td=r2.insertCell(); td.className='h-week';
+  if(i===4) td.classList.add('month-end'); // W5 is last June week
+  td.textContent=w.label;
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function decorate(td){
+  for(let wi=1;wi<NW;wi++){
+    const v=document.createElement('div'); v.className='vg';
+    v.style.left=wpct(wi);
+    v.style.background=wi===5?'rgba(255,255,255,0.14)':'rgba(255,255,255,0.06)';
+    td.appendChild(v);
+  }
+  const tl=document.createElement('div'); tl.className='tline';
+  tl.style.left=todayPct;
+  td.appendChild(tl);
+}
+
+function addBar(td, bar, color, isPhase, isMilestone){
+  const sp = numPctStart(bar.s);
+  const ep = numPctEnd(bar.e);
+  const wp = ep - sp;
+  if(isMilestone){
+    const d=document.createElement('div'); d.className='milestone';
+    d.style.background=color;
+    d.style.left=`calc(${sp + wp/2}% - 7.5px)`;
+    d.style.boxShadow='0 2px 8px rgba(0,0,0,0.4)';
+    td.appendChild(d);
+  } else {
+    const b=document.createElement('div');
+    b.className='bar '+(isPhase?'bar-phase':'bar-task');
+    b.style.left=sp+'%'; b.style.width=wp+'%';
+    b.style.background=color;
+    b.style.boxShadow='0 2px 10px rgba(0,0,0,0.3)';
+    td.appendChild(b);
+  }
+}
+
+// ── Render phases ─────────────────────────────────────────────────────────────
+const phaseData = []; // for connector drawing
+
+phases.forEach((ph, pi)=>{
+  // Phase header row
+  const pr=tbl.insertRow(); pr.className='row-phase';
+  const pl=pr.insertCell(); pl.className='phase-label'; pl.textContent=ph.label;
+  const pbt=pr.insertCell(); pbt.className='bar-td'; pbt.colSpan=NW;
+  pbt.style.paddingBottom='5px'; pbt.style.verticalAlign='bottom';
+  decorate(pbt);
+  addBar(pbt, ph.bar, ph.color, true, false);
+
+  const taskBts=[];
+  ph.tasks.forEach(task=>{
+    const tr=tbl.insertRow(); tr.className='row-task';
+    const tl2=tr.insertCell(); tl2.className='task-label'; tl2.textContent=task.label;
+    const bt=tr.insertCell(); bt.className='bar-td'; bt.colSpan=NW;
+    decorate(bt);
+    addBar(bt, task.bar, ph.color, false, task.milestone||false);
+    taskBts.push({ bt, bar:task.bar, milestone:task.milestone||false });
+  });
+  phaseData.push({ pbt, taskBts, ph });
+
+  if(pi<phases.length-1){
+    const gr=tbl.insertRow(); gr.className='row-gap';
+    gr.insertCell();
+    const g2=gr.insertCell(); g2.colSpan=NW; g2.style.position='relative';
+    const tl3=document.createElement('div'); tl3.className='tline';
+    tl3.style.left=todayPct; g2.appendChild(tl3);
+  }
+});
+
+// TODAY label
+const firstPhaseBt = document.querySelector('.row-phase .bar-td');
+if(firstPhaseBt){
+  const lbl=document.createElement('div');
+  lbl.style.cssText=`position:absolute;bottom:calc(100% + 2px);left:${todayPct};transform:translateX(-50%);font-size:9px;font-weight:700;color:var(--today);letter-spacing:0.6px;white-space:nowrap;z-index:25;`;
+  lbl.textContent='TODAY';
+  firstPhaseBt.style.overflow='visible';
+  firstPhaseBt.appendChild(lbl);
+}
+
+// ── Connector lines (SVG, drawn after layout) ─────────────────────────────────
+window.addEventListener('load', ()=>{
+  phaseData.forEach(({ pbt, taskBts, ph })=>{
+    if(!taskBts.length) return;
+    const spineLeftPct = numPctStart(ph.bar.s); // % position of phase bar left = spine x
+    const nT = taskBts.length;
+
+    // Draw spine tail in phase row (from bar midpoint down to bottom of row)
+    {
+      const cw=pbt.getBoundingClientRect().width;
+      const ch=pbt.getBoundingClientRect().height;
+      if(!cw) return;
+      const svg=makeSVG();
+      const sx=spineLeftPct/100*cw;
+      const barMidY=ch*0.73; // bar sits at bottom of phase cell
+      addLine(svg, sx, barMidY, sx, ch+1, ph.hex, 1.5, 0.65);
+      pbt.appendChild(svg);
+    }
+
+    // Draw connectors in each task row
+    taskBts.forEach(({ bt, bar, milestone }, ti)=>{
+      const cw=bt.getBoundingClientRect().width;
+      const ch=bt.getBoundingClientRect().height;
+      if(!cw) return;
+
+      const svg=makeSVG();
+      const sx = spineLeftPct/100*cw;                  // spine x
+      const bx = numPctStart(bar.s)/100*cw;            // bar left x
+      const midY = ch/2;
+
+      // Vertical spine: top→mid for first task; 0→bottom for middle; 0→mid for last
+      const spineTop = (ti===0) ? midY : 0;
+      const spineBot = (ti===nT-1) ? midY : ch;
+
+      if(spineBot > spineTop)
+        addLine(svg, sx, spineTop, sx, spineBot, ph.hex, 1.5, 0.65);
+
+      // Horizontal jog from spine to bar left
+      if(bx > sx+1)
+        addLine(svg, sx, midY, bx, midY, ph.hex, 1.5, 0.65);
+
+      bt.appendChild(svg);
+    });
+  });
+});
+
+function makeSVG(){
+  const s=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  s.setAttribute('width','100%'); s.setAttribute('height','100%');
+  s.style.cssText='position:absolute;top:0;left:0;overflow:visible;pointer-events:none;z-index:9;';
+  return s;
+}
+function addLine(svg,x1,y1,x2,y2,color,sw,opacity){
+  const l=document.createElementNS('http://www.w3.org/2000/svg','line');
+  l.setAttribute('x1',x1); l.setAttribute('y1',y1);
+  l.setAttribute('x2',x2); l.setAttribute('y2',y2);
+  l.setAttribute('stroke',color); l.setAttribute('stroke-width',sw);
+  l.setAttribute('stroke-opacity',opacity);
+  svg.appendChild(l);
+}
+</script>
+</body>
+</html>
