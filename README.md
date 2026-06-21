@@ -1,2 +1,2 @@
    # Project Timeline
-   Gantt chart for my research project (Jun–Jul 2026)
+   Gantt chart for usj sports research project (Jun–Jul 2026)
